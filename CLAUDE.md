@@ -20,7 +20,14 @@ npm run api               # backend only (server/index.js)
 npm run build             # production build (vite build)
 ```
 
-There is no test suite and no linter configured.
+There is no unit-test suite and no linter, but there IS an end-to-end smoke harness — **run it after any backend change and before declaring work done**:
+
+```bash
+npm run smoke             # against the live deploy (default new-orbit.vercel.app)
+npm run smoke:local       # against a locally running `npm run api`
+```
+
+`scripts/smoke.mjs` checks auth (401/403/404), tenant isolation, secret masking, and a write roundtrip; it exits non-zero on any failure. After pushing to `main`, wait for the Vercel deploy to finish, then run `npm run smoke` against production. See `docs/WORKPLAN.md` for the full development playbook and the per-task acceptance criteria.
 
 ## Architecture
 
@@ -42,7 +49,7 @@ All API logic lives in `server/router.js` as a single `handle(method, pathname, 
 - Tenant secrets (LINE channel tokens, ECPay/JKoPay keys) are **write-only**: GET returns only `hasXxx` flags and `••••••••` masks; the frontend sends an empty string to mean "unchanged". Never echo raw secret values.
 - `SUPABASE_SERVICE_ROLE_KEY` / `AUTH_SECRET` must never get a `VITE_` prefix (VITE_ vars are bundled into the public frontend).
 
-**Known gaps (as of the last audit):** `resolveOrgId()` falls back to the oldest org when a slug doesn't resolve (and caches the wrong mapping), and the `:id` routes (items/resources/orders/customers/tags/holidays/resource-leaves) filter by `id` only without `.eq('org_id', orgId)` — both break tenant isolation once a second tenant exists. Fix rather than replicate these patterns when touching the router.
+Tenant-isolation invariants enforced in the router (keep them when adding routes): `resolveOrgId()` is strict — an unknown slug is a 404 `ORG_NOT_FOUND`, never a fallback to another org; when no `orgId` query param is given on a protected route, scope defaults to the caller's own org from the token; **every** org-scoped query — including `:id` lookups, updates, and deletes — must carry `.eq('org_id', orgId)`; `organizations/:id` PUT checks membership of the org in the URL. The `smoke-b` tenant in `server/seed.sql` exists solely so the smoke harness can prove cross-tenant access fails — don't delete it.
 
 ### Frontend data layer
 

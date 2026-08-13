@@ -108,4 +108,24 @@ insert into subscription_payments (org_id, paid_at, plan, cycle, amount, status)
 select o.id, v.d::date,'團隊版','月繳',790,'PAID'
 from orgs o, (values ('2026-08-01'),('2026-07-01')) as v(d) where o.slug='midao';
 
+-- ---------------------------------------------------------------------------
+-- 第二商家 smoke-b：scripts/smoke.mjs 跨租戶隔離測試的固定 fixture。
+-- 不要刪除；smoke 測試靠它驗證「B 商家的 token 讀不到/寫不到 A 商家的資料」。
+-- ---------------------------------------------------------------------------
+with b_org as (
+  insert into orgs (slug, name, contact_email, plan, plan_display_name)
+  values ('smoke-b', '隔離測試商家', 'smoke-b@orbit.test', 'SOLO', '個人版')
+  returning id
+),
+b_user as (
+  insert into users (email, password_hash, name, is_verified)
+  values ('smoke-b@orbit.test', crypt('smoketest', gen_salt('bf')), '隔離測試帳號', true)
+  returning id
+)
+insert into staff (user_id, org_id, role)
+select b_user.id, b_org.id, 'OWNER' from b_user, b_org;
+
+insert into customers (org_id, name, phone)
+select id, '隔離測試客', '0900-000-000' from orgs where slug='smoke-b';
+
 commit;

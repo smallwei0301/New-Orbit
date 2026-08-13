@@ -49,26 +49,19 @@ const isUuid = (s) =>
   typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
 
 /**
- * Accepts a uuid, a slug ("midao"), or anything else (falls back to the first
- * org) so the API stays usable while the frontend still passes a placeholder.
+ * Accepts a uuid or a slug ("midao") and resolves it to the org uuid.
+ * STRICT: an unknown slug returns null — never fall back to "some" org and
+ * never cache a failed lookup. Falling back would let a request scoped to a
+ * non-existent org silently read another tenant's data (the router's
+ * membership guard compares against whatever we return here).
  */
 export async function resolveOrgId(key) {
+  if (!key) return null
   if (isUuid(key)) return key
-  if (key && orgCache.has(key)) return orgCache.get(key)
+  if (orgCache.has(key)) return orgCache.get(key)
 
-  if (key) {
-    const { data } = await supabase.from('orgs').select('id').eq('slug', key).maybeSingle()
-    if (data) {
-      orgCache.set(key, data.id)
-      return data.id
-    }
-  }
-  const { data: first } = await supabase
-    .from('orgs')
-    .select('id')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-  if (first && key) orgCache.set(key, first.id)
-  return first?.id || null
+  const { data } = await supabase.from('orgs').select('id').eq('slug', key).maybeSingle()
+  if (!data) return null
+  orgCache.set(key, data.id)
+  return data.id
 }

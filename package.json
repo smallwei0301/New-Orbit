@@ -10,7 +10,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "api": "node server/index.js",
-    "db:check": "node server/check.js"
+    "db:check": "node server/check.js",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:local": "SMOKE_BASE_URL=http://localhost:8080/api/v1 node scripts/smoke.mjs"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.2.7",

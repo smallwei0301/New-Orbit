@@ -48,16 +48,24 @@ async function staffFor(userId) {
 export async function handle(method, pathname, query = {}, body = {}, headers = {}) {
   const p = pathname.replace(/^\/api\/v1\/?/, '').replace(/\/+$/, '')
   const seg = p.split('/').filter(Boolean)
-  const orgId = await resolveOrgId(query.orgId)
+
+  // Strict tenant resolution: an orgId that doesn't resolve is a hard 404,
+  // NOT a fallback to some other tenant.
+  let orgId = await resolveOrgId(query.orgId)
+  if (query.orgId && !orgId) return err(404, 'ORG_NOT_FOUND', '找不到商家資料')
 
   // ---------------- auth guard ----------------
+  let payload = null
   if (!isPublic(method, p)) {
-    const payload = verifyToken(bearerFrom(headers))
+    payload = verifyToken(bearerFrom(headers))
     if (!payload) return err(401, 'INVALID_TOKEN', '請重新登入')
     const memberOf = (payload.staff || []).map((s) => s.orgId)
     if (orgId && !payload.isSuperUser && !memberOf.includes(orgId)) {
       return err(403, 'INSUFFICIENT_PERMISSION', '沒有此商家的權限')
     }
+    // No orgId in the query → scope every query below to the caller's own org
+    // instead of guessing. All org-scoped reads/writes MUST filter by orgId.
+    if (!orgId) orgId = memberOf[0] || null
   }
 
   // ---------------- auth ----------------
@@ -98,7 +106,7 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   if (p === 'me' && method === 'GET') {
     const { data: user } = await supabase
       .from('users').select('id, email, name, phone, is_verified')
-      .order('created_at', { ascending: true }).limit(1).maybeSingle()
+      .eq('id', payload.sub).maybeSingle()
     if (!user) return err(404, 'NOT_FOUND', '找不到使用者')
     return ok({ user, staff: await staffFor(user.id), blockedOrgIds: [], isSuperUser: false })
   }
@@ -118,6 +126,12 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
       return data ? ok(toOrg(data)) : err(404, 'NOT_FOUND', '找不到商家資料')
     }
     if (seg.length === 2 && method === 'PUT') {
+      // The org being written is the one in the URL — the caller must be a
+      // member of THAT org (query.orgId alone is not enough).
+      const memberOf = (payload?.staff || []).map((s) => s.orgId)
+      if (!payload?.isSuperUser && !memberOf.includes(seg[1])) {
+        return err(403, 'INSUFFICIENT_PERMISSION', '沒有此商家的權限')
+      }
       const { data, error } = await supabase
         .from('orgs').update({ ...fromOrg(body), updated_at: new Date().toISOString() })
         .eq('id', seg[1]).select('*').maybeSingle()
@@ -128,6 +142,7 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
 
   // ---------------- items ----------------
   if ((p === 'store/items' || p === 'items') && method === 'GET') {
+    if (!orgId) return err(400, 'ORG_REQUIRED', '找不到商家資料')
     let q = supabase
       .from('items').select('*, item_resources(resources(name))')
       .eq('org_id', orgId).order('sort_order')
@@ -146,18 +161,19 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   if (seg[0] === 'items' && seg[1]) {
     if (method === 'GET') {
       const { data } = await supabase
-        .from('items').select('*, item_resources(resources(name))').eq('id', seg[1]).maybeSingle()
+        .from('items').select('*, item_resources(resources(name))')
+        .eq('id', seg[1]).eq('org_id', orgId).maybeSingle()
       return data ? ok(toItem(data)) : err(404, 'NOT_FOUND', '找不到項目')
     }
     if (method === 'PUT') {
       const { data, error } = await supabase
         .from('items').update({ ...fromItem(body), updated_at: new Date().toISOString() })
-        .eq('id', seg[1]).select('*').maybeSingle()
+        .eq('id', seg[1]).eq('org_id', orgId).select('*').maybeSingle()
       if (error) return err(400, 'UPDATE_FAILED', error.message)
-      return ok(toItem(data))
+      return data ? ok(toItem(data)) : err(404, 'NOT_FOUND', '找不到項目')
     }
     if (method === 'DELETE') {
-      const { error } = await supabase.from('items').delete().eq('id', seg[1])
+      const { error } = await supabase.from('items').delete().eq('id', seg[1]).eq('org_id', orgId)
       if (error) return err(400, 'DELETE_FAILED', error.message)
       return ok({ ok: true })
     }
@@ -179,17 +195,19 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   }
   if (seg[0] === 'resources' && seg[1]) {
     if (method === 'GET') {
-      const { data } = await supabase.from('resources').select('*').eq('id', seg[1]).maybeSingle()
+      const { data } = await supabase
+        .from('resources').select('*').eq('id', seg[1]).eq('org_id', orgId).maybeSingle()
       return data ? ok(toResource(data)) : err(404, 'NOT_FOUND', '找不到資源')
     }
     if (method === 'PUT') {
       const { data, error } = await supabase
-        .from('resources').update(fromResource(body)).eq('id', seg[1]).select('*').maybeSingle()
+        .from('resources').update(fromResource(body))
+        .eq('id', seg[1]).eq('org_id', orgId).select('*').maybeSingle()
       if (error) return err(400, 'UPDATE_FAILED', error.message)
-      return ok(toResource(data))
+      return data ? ok(toResource(data)) : err(404, 'NOT_FOUND', '找不到資源')
     }
     if (method === 'DELETE') {
-      const { error } = await supabase.from('resources').delete().eq('id', seg[1])
+      const { error } = await supabase.from('resources').delete().eq('id', seg[1]).eq('org_id', orgId)
       if (error) return err(400, 'DELETE_FAILED', error.message)
       return ok({ ok: true })
     }
@@ -221,15 +239,16 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   }
   if (seg[0] === 'orders' && seg[1]) {
     if (method === 'GET') {
-      const { data } = await supabase.from('orders').select(ORDER_SELECT).eq('id', seg[1]).maybeSingle()
+      const { data } = await supabase
+        .from('orders').select(ORDER_SELECT).eq('id', seg[1]).eq('org_id', orgId).maybeSingle()
       return data ? ok(toOrder(data)) : err(404, 'NOT_FOUND', '找不到預約')
     }
     if (method === 'PUT') {
       const { data, error } = await supabase
         .from('orders').update({ ...fromOrder(body), updated_at: new Date().toISOString() })
-        .eq('id', seg[1]).select(ORDER_SELECT).maybeSingle()
+        .eq('id', seg[1]).eq('org_id', orgId).select(ORDER_SELECT).maybeSingle()
       if (error) return err(400, 'UPDATE_FAILED', error.message)
-      return ok(toOrder(data))
+      return data ? ok(toOrder(data)) : err(404, 'NOT_FOUND', '找不到預約')
     }
   }
 
@@ -250,23 +269,30 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   if (seg[0] === 'customers' && seg[1]) {
     if (method === 'GET') {
       const { data } = await supabase
-        .from('customers').select('*, customer_tags(tag_id)').eq('id', seg[1]).maybeSingle()
+        .from('customers').select('*, customer_tags(tag_id)')
+        .eq('id', seg[1]).eq('org_id', orgId).maybeSingle()
       return data ? ok(toCustomer(data)) : err(404, 'NOT_FOUND', '找不到客戶')
     }
     if (method === 'PUT') {
       const { data, error } = await supabase
-        .from('customers').update(fromCustomer(body)).eq('id', seg[1])
+        .from('customers').update(fromCustomer(body)).eq('id', seg[1]).eq('org_id', orgId)
         .select('*, customer_tags(tag_id)').maybeSingle()
       if (error) return err(400, 'UPDATE_FAILED', error.message)
-      // optional tag re-assignment
+      if (!data) return err(404, 'NOT_FOUND', '找不到客戶')
+      // optional tag re-assignment — only tags belonging to this org may be attached
       if (Array.isArray(body.tags)) {
         await supabase.from('customer_tags').delete().eq('customer_id', seg[1])
         if (body.tags.length) {
-          await supabase.from('customer_tags')
-            .insert(body.tags.map((tag_id) => ({ customer_id: seg[1], tag_id })))
+          const { data: validTags } = await supabase
+            .from('tags').select('id').eq('org_id', orgId).in('id', body.tags)
+          if (validTags?.length) {
+            await supabase.from('customer_tags')
+              .insert(validTags.map(({ id }) => ({ customer_id: seg[1], tag_id: id })))
+          }
         }
         const { data: fresh } = await supabase
-          .from('customers').select('*, customer_tags(tag_id)').eq('id', seg[1]).maybeSingle()
+          .from('customers').select('*, customer_tags(tag_id)')
+          .eq('id', seg[1]).eq('org_id', orgId).maybeSingle()
         return ok(toCustomer(fresh))
       }
       return ok(toCustomer(data))
@@ -291,12 +317,13 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
   if (seg[0] === 'tags' && seg[1]) {
     if (method === 'PUT') {
       const { data, error } = await supabase
-        .from('tags').update({ name: body.name }).eq('id', seg[1]).select('*').maybeSingle()
+        .from('tags').update({ name: body.name })
+        .eq('id', seg[1]).eq('org_id', orgId).select('*').maybeSingle()
       if (error) return err(400, 'UPDATE_FAILED', '更新失敗（可能已有同名標籤）')
-      return ok(toTag(data))
+      return data ? ok(toTag(data)) : err(404, 'NOT_FOUND', '找不到標籤')
     }
     if (method === 'DELETE') {
-      const { error } = await supabase.from('tags').delete().eq('id', seg[1])
+      const { error } = await supabase.from('tags').delete().eq('id', seg[1]).eq('org_id', orgId)
       if (error) return err(400, 'DELETE_FAILED', error.message)
       return ok({ ok: true })
     }
@@ -336,7 +363,7 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
     }
   }
   if (seg[0] === 'holidays' && seg[1] && method === 'DELETE') {
-    const { error } = await supabase.from('holidays').delete().eq('id', seg[1])
+    const { error } = await supabase.from('holidays').delete().eq('id', seg[1]).eq('org_id', orgId)
     if (error) return err(400, 'DELETE_FAILED', error.message)
     return ok({ ok: true })
   }
@@ -370,7 +397,8 @@ export async function handle(method, pathname, query = {}, body = {}, headers = 
     }
   }
   if (seg[0] === 'resource-leaves' && seg[1] && method === 'DELETE') {
-    const { error } = await supabase.from('resource_leaves').delete().eq('id', seg[1])
+    const { error } = await supabase
+      .from('resource_leaves').delete().eq('id', seg[1]).eq('org_id', orgId)
     if (error) return err(400, 'DELETE_FAILED', error.message)
     return ok({ ok: true })
   }
