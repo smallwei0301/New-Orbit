@@ -1,11 +1,14 @@
 /**
- * Vercel serverless entry point — catches every /api/* request and delegates
- * to the same router used by the local server, so there is one implementation
- * of the API contract regardless of where it runs.
+ * Vercel serverless entry point.
  *
- * Env vars required on Vercel (Project Settings → Environment Variables):
+ * Every /api/* request is routed here by an explicit rewrite in vercel.json,
+ * which passes the original path as `__path`. We do NOT rely on filename-based
+ * catch-all routing ([...path].js), because Vercel's plain /api functions only
+ * matched a single path segment that way — /api/v1/auth/sign-in 404'd.
+ *
+ * Env vars required on Vercel:
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AUTH_SECRET
- * None of these may be VITE_-prefixed — they must stay server-side.
+ * None may be VITE_-prefixed — they must stay server-side.
  */
 import { handle } from '../server/router.js'
 
@@ -19,6 +22,13 @@ export default async function handler(req, res) {
   }
 
   const url = new URL(req.url, `https://${req.headers.host || 'localhost'}`)
+
+  // Prefer the original path handed over by the rewrite; fall back to the real
+  // URL so this same file works when run locally without any rewrite.
+  const forced = url.searchParams.get('__path')
+  const pathname = forced ? `/api/${String(forced).replace(/^\/+/, '')}` : url.pathname
+
+  url.searchParams.delete('__path')
   const query = Object.fromEntries(url.searchParams.entries())
 
   let body = {}
@@ -29,7 +39,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await handle(req.method, url.pathname, query, body, req.headers)
+    const result = await handle(req.method, pathname, query, body, req.headers)
     res.status(result.status).json(result.body)
   } catch (e) {
     console.error('[api]', e)
