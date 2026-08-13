@@ -1,0 +1,103 @@
+# CI — 每個 PR 與每次 push 到 main 都跑：前端 build + API smoke 契約測試。
+# 見 docs/WORKPLAN.md 鐵律第 3 條：smoke 紅著就不准 merge。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支上新的 push 會取消還在跑的舊 run，省 Actions 分鐘數。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 前端 build — 不需要任何 secret，fork 的 PR 也跑得動。
+  # ---------------------------------------------------------------------------
+  build:
+    name: 前端 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # API smoke — 啟動本地 API（server/index.js）後跑 scripts/smoke.mjs。
+  # 需要 secrets；沒設定時整個測試步驟略過而不是失敗（fork PR 拿不到 secrets）。
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: API smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # secrets 不能直接用在 job/step 的 if，先映射成 env 再判斷。
+      - name: 檢查 secrets 是否已設定
+        id: guard
+        env:
+          HAS_URL: ${{ secrets.SUPABASE_URL != '' }}
+          HAS_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY != '' }}
+          HAS_AUTH: ${{ secrets.AUTH_SECRET != '' }}
+        run: |
+          if [ "$HAS_URL" = "true" ] && [ "$HAS_KEY" = "true" ] && [ "$HAS_AUTH" = "true" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=smoke 已略過::尚未設定 Actions secrets（SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / AUTH_SECRET），略過 smoke 測試。設定方式見 issue #1。"
+          fi
+
+      # 啟動 API 與跑 smoke 放同一個 step，確保背景程序在測試期間確實存活。
+      - name: 啟動 API 並跑 smoke
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          API_PORT: '8080'
+        run: |
+          set -euo pipefail
+
+          npm run api > /tmp/api.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+
+          # 等 API 就緒：公開端點回 200 才算數（同時證明 DB 連得上、有示範資料）。
+          ready=false
+          for i in $(seq 1 30); do
+            if ! kill -0 "$API_PID" 2>/dev/null; then
+              echo "::error::API 程序已結束，log 如下："
+              cat /tmp/api.log
+              exit 1
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "http://localhost:8080/api/v1/store/items?orgId=midao" || true)
+            if [ "$code" = "200" ]; then ready=true; break; fi
+            sleep 1
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "::error::API 未在 30 秒內就緒（最後 HTTP 狀態：${code:-無回應}），log 如下："
+            cat /tmp/api.log
+            exit 1
+          fi
+
+          npm run smoke:local
+
+      - name: 失敗時輸出 API log
+        if: failure() && steps.guard.outputs.ready == 'true'
+        run: cat /tmp/api.log || true
