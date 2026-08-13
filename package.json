@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Orbit 預約系統 — 後台管理骨架 (self-hostable, multi-tenant reconstruction)",
+  "engines": {
+    "comment": "@supabase/supabase-js 的 realtime client 需要原生 WebSocket；Node 20 下 createClient() 會拋錯",
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently -n api,web -c magenta,cyan \"npm:api\" \"npm:dev\"",
