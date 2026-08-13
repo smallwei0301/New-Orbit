@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ *
+ * Orbit design-system — CSS variables + component classes
+ * Extracted 1:1 from the production build. These custom classes are the
+ * reusable "components" of the design system; utilities above cover the rest.
+ * ------------------------------------------------------------------ */
+:root {
+  --orbit-primary: #a08060;
+  --orbit-primary-hover: #8b6e50;
+  --orbit-bg: #faf7f2;
+  --orbit-warm: #f5f0e8;
+  --orbit-card: #ffffff;
+  --orbit-border: #ede8e0;
+  --orbit-300: #b8a99a;
+  --orbit-400: #9c8e7c;
+  --orbit-500: #7a6e5e;
+  --orbit-700: #5c4f3d;
+  --orbit-900: #3d3528;
+  --orbit-success: #6b8f71;
+  --orbit-danger: #c45d4e;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--orbit-bg);
+  color: var(--orbit-700);
+  font-family: 'Noto Sans TC', 'Zen Maru Gothic', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Card ---- */
+.orbit-card {
+  background: var(--orbit-card);
+  border: 1px solid var(--orbit-border);
+  border-radius: 24px;
+  box-shadow: 0 1px 3px #a0806014;
+}
+.orbit-card-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.orbit-card-hover:hover {
+  box-shadow: 0 8px 24px #a080601f;
+}
+.orbit-card-contents {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--orbit-border);
+}
+.orbit-card-contents-title {
+  margin: 0 0 0.375rem;
+  font-size: 0.75rem;
+  color: var(--orbit-400);
+}
+
+/* ---- Buttons ---- */
+.orbit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.orbit-btn:active {
+  transform: scale(0.97);
+}
+.orbit-btn-primary {
+  background: var(--orbit-primary);
+  color: #fff;
+}
+.orbit-btn-primary:hover {
+  background: var(--orbit-primary-hover);
+}
+.orbit-btn-ghost {
+  background: transparent;
+  color: var(--orbit-500);
+}
+.orbit-btn-ghost:hover {
+  background: var(--orbit-warm);
+}
+
+/* ---- Data grid table (subgrid) ---- */
+.orbit-grid-table {
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid var(--orbit-border);
+  background: #fff;
+  box-shadow: 0 1px 3px #a0806014;
+}
+.orbit-grid-table-head {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  border-bottom: 1px solid var(--orbit-border);
+  background: #faf7f280;
+  min-width: max-content;
+}
+.orbit-grid-table-th {
+  padding: 0.75rem 1.25rem;
+  text-align: left;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9c8e7c;
+}
+.orbit-grid-table-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  border-bottom: 1px solid #ede8e080;
+  transition: background-color 0.1s ease;
+  min-width: max-content;
+}
+.orbit-grid-table-row:hover {
+  background: #faf7f2;
+}
+.orbit-grid-table-td {
+  padding: 0.875rem 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* ---- Dropdown animation helper ---- */
+.orbit-dropdown-in {
+  animation: orbit-dropdown-in 0.15s ease-out;
+}
+@keyframes orbit-dropdown-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
