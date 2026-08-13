@@ -25,6 +25,22 @@ npm run dev:all           # 同時啟動 API (8080) 與前端 (5173)
 
 `midao` 是 **vendor slug**；網址 `/midao/dashboard` 是後台、`/midao` 是顧客店面。
 
+## 測試（smoke harness）
+
+沒有單元測試，但有一套端對端契約測試 `scripts/smoke.mjs`：驗認證（401/403/404）、
+**租戶隔離**、機密遮罩、寫入往返。任何失敗都會 exit 1。
+
+```bash
+npm run smoke         # 打線上 (new-orbit.vercel.app)
+npm run smoke:local   # 打本地（需先 npm run api）
+```
+
+> **改過 `server/` 或 `api/` 就要跑到全綠才算完成**；推上 `main` 後等 Vercel 部署完，
+> 再對線上跑一次。跨租戶那幾條測試需要 `server/seed.sql` 建立的第二商家 `smoke-b`
+> （不存在時會標記 SKIP 而非失敗）。
+
+開發流程、每張工作票的驗收標準見 **`docs/WORKPLAN.md`**；給 AI 助手的專案導覽見 `CLAUDE.md`。
+
 ## 後端與資料庫
 
 `server/` 是一個輕量 Node API（零框架），資料存在 **Supabase (Postgres)**。

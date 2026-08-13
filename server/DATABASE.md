@@ -56,3 +56,13 @@ npx supabase db pull          # 產生 supabase/migrations/*.sql
 
 `server/seed.sql` 內含示範商家（midao）與全部示範資料。在 Supabase SQL Editor 執行即可。
 示範帳號：`demo@orbit.test` / `demo1234`。
+
+### ⚠️ `smoke-b` 商家不可刪除
+
+`seed.sql` 尾端另外建立第二個商家 **`smoke-b`**（帳號 `smoke-b@orbit.test` / `smoketest`），
+它不是示範資料，而是 `scripts/smoke.mjs` 的**租戶隔離測試 fixture**：測試會用 B 商家的 token
+去讀寫 A 商家（midao）的資料，驗證一律被擋（403/404）。
+
+因為後端一律用 service_role 繞過 RLS，**租戶隔離完全靠 `server/router.js` 自己把關**
+（每一條 org 範圍查詢都要 `.eq('org_id', orgId)`，包含 `:id` 的 GET/PUT/DELETE）。
+沒有這個第二商家，就沒有任何東西能證明隔離仍然有效——所以請保留它。
